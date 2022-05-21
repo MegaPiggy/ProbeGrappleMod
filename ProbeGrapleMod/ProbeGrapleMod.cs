@@ -1,16 +1,20 @@
 ﻿using UnityEngine;
 using CAMOWA;
-using System.Collections;
+using CAMOWA.FileImporting;
 using System;
-using DIMOWAModLoader;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using System.IO;
+using System.Reflection;
+using BepInEx;
 
 namespace PGM
 {
-
-    public class ProbeGrapleMod : MonoBehaviour
+    [BepInPlugin("Locochoco.OWA.ProbeGrapple", "Probe Grapple", "1.1.1")]
+    [BepInProcess("OuterWilds_Alpha_1_2.exe")]
+    public class ProbeGrapleMod : BaseUnityPlugin
     {
-        public ClientDebuggerSide Debugger { get; private set; }
-
         private GameObject grapplePoint;
         public LayerMask whatIsGrappleable;
 
@@ -23,8 +27,8 @@ namespace PGM
         public Transform ship;
 
         //Assets importados
-        private AudioClip throwClip;
-        private Mesh hookMesh;
+        private static AudioClip throwClip;
+        private static Mesh hookMesh;
         private AudioSource wavPlayer;
 
         public bool IsGrappling { get; set; }
@@ -34,35 +38,46 @@ namespace PGM
         private float frictionConstant;
         private float originalLenght;
 
-        GUIStyle aparenciaDoTexto;
-        
-        [IMOWAModInnit("Probe Graple Mod", 1, 2)]
-        public static void ModInnit(string porOndeTaInicializando)
+        private GUIStyle aparenciaDoTexto;
+
+        private static string gamePath;
+        public static string DllExecutablePath
         {
-            Debug.Log("ProbeGrapleMod foi iniciado em "+ porOndeTaInicializando);
-            GameObject.FindGameObjectsWithTag("Player")[0].AddComponent<ProbeGrapleMod>();
-            Debug.Log("O script do mod foi colocado no 'Player' ");
+            get
+            {
+                if (string.IsNullOrEmpty(gamePath))
+                    gamePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                return gamePath;
+            }
+
+            private set { }
         }
 
-
-        private IEnumerator ImportAllFiles()
+        public static void GetFiles()
         {
-            WWW wwwImportThrowClip = new WWW(WWWHelper.RelativePathToUrl(@"PGMAssets\Fuoooo.wav"));
-            yield return wwwImportThrowClip;
-            throwClip = wwwImportThrowClip.audioClip;
-            yield break;
+            if (hookMesh == null)
+            {
+                hookMesh = FileImporter.ImportOBJMesh(Path.Combine(DllExecutablePath, "grapleHookModel.obj"));
+            }
+            if (throwClip == null)
+            {
+                try
+                {
+                    throwClip = FileImporter.ImportWAVAudio(Path.Combine(DllExecutablePath, "Fuoooo.wav"));
+                }
+                catch { Debug.Log("Erro ao ler o audio"); }
+            }
         }
 
-        void Start()
+        private void Awake()
         {
-            Debugger = GameObject.Find("DIMOWALevelLoaderHandler").GetComponent<ClientDebuggerSide>();
+            Debug.Log("ProbeGrapleMod was started");
+            Debug.Log($"The mod script has been placed in the '{this.gameObject.name}'");
+            GetFiles();
+        }
 
-            WWWHelper wwwHelper = new WWWHelper();
-            StartCoroutine(ImportAllFiles());
-            ObjImporter objImporter = new ObjImporter();
-            //        \OuterWilds_Alpha_1_2_Data\OuterWilds_Alpha_1_2_Data\Assets\PGMAssets
-            hookMesh = objImporter.ImportFile(@"PGMAssets\grapleHookModel.obj");
-
+        private void Start()
+        {
             modCamera = gameObject.FindWithRequiredTag("MainCamera").camera.transform;
             player = gameObject.FindWithRequiredTag("Player").transform;
             ship = gameObject.FindWithRequiredTag("Ship").transform;
@@ -73,13 +88,13 @@ namespace PGM
             }
             catch(Exception e)
             {
-                Debugger.SendLog($"Erro ao pegar o AudioSource do player: {e}");
+                Debug.Log($"Error getting AudioSource from player: {e}");
             }
             if(wavPlayer == null)
             {
                 wavPlayer = gameObject.FindWithRequiredTag("Player").AddComponent<AudioSource>();
             }
-            Debug.Log($"O wav player é {wavPlayer != null}");
+            Debug.Log($"The wav player {(wavPlayer != null ? "exists" : "does not exist")}");
 
 
             IsGrappling = false;
@@ -105,8 +120,9 @@ namespace PGM
 
             
         }
-        bool ropeBroke = false;
-        void FixedUpdate()
+
+        private bool ropeBroke = false;
+        private void FixedUpdate()
         {
             if (grapplePoint != null)
             {
@@ -115,7 +131,7 @@ namespace PGM
 
                 if(playerDistance >= grapleRadius + 25f)
                 {
-                    Debugger.SendLog("A corda se partiu");
+                    Debug.Log("the rope broke");
                     StopGrapple();
                     lr.SetWidth(lineThicness, lineThicness);
                     ropeBroke = true;
@@ -148,12 +164,12 @@ namespace PGM
             }
         }
 
-        float tempoPassado = 0f;
-        readonly float tempoParaAlterar = 0.25f;
+        private float tempoPassado = 0f;
+        private readonly float tempoParaAlterar = 0.25f;
 
-        
 
-        void Update()
+
+        private void Update()
         {
             if (Input.GetKeyDown(KeyCode.G))
             {
@@ -193,15 +209,15 @@ namespace PGM
             }
         }
 
-        void LateUpdate()
+        private void LateUpdate()
         {
             DrawRope();
         }
 
-        float tempoDesdeOUltimoTexto = 0f;
-        readonly float tempoDoTexto = 3f;
-        bool showGUI = false;
-        void OnGUI()
+        private float tempoDesdeOUltimoTexto = 0f;
+        private readonly float tempoDoTexto = 3f;
+        private bool showGUI = false;
+        private void OnGUI()
         {
             if (tempoDesdeOUltimoTexto <= tempoDoTexto && showGUI)
                 GUI.Box(new Rect(559f, 519f, 680f, 93f), $"{grapleRadius} m", aparenciaDoTexto);
@@ -210,11 +226,27 @@ namespace PGM
 
             tempoDesdeOUltimoTexto += Time.deltaTime;
         }
-        
-        void StartGrapple(Transform alvo, float ropeLenght, float ropeStrenght = 0.008f, float friction = 0.00651f)
+
+
+        public static GameObject SimplestBoxOWObject(float mass = 1)
         {
-            grapplePoint = BasicOWRigidbodyGO.SimplestBoxOWObject(Vector3.one);
-            grapplePoint.rigidbody.mass = 0.001f;
+            Vector3 cubeSize = Vector3.one;
+            Vector3 colliderSize = Vector3.one;
+            GameObject primitive = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            primitive.transform.localScale = cubeSize;
+            primitive.AddComponent<Rigidbody>().mass = mass;
+            primitive.AddComponent<OWRigidbody>();
+            GameObject gameObject = new GameObject();
+            gameObject.GetComponent<Transform>().parent = primitive.transform;
+            gameObject.AddComponent<MeshFilter>().mesh = primitive.GetComponent<MeshFilter>().mesh;
+            gameObject.AddComponent<BoxCollider>().size = colliderSize;
+            gameObject.AddComponent<MultiFieldDetector>();
+            return primitive;
+        }
+
+        private void StartGrapple(Transform alvo, float ropeLenght, float ropeStrenght = 0.008f, float friction = 0.00651f)
+        {
+            grapplePoint = SimplestBoxOWObject(0.001f);
             grapplePoint.transform.parent = transform.root;
             grapplePoint.AddComponent<HookAnchor>().HookManager = gameObject.GetComponent<ProbeGrapleMod>();
             grapplePoint.transform.name = "grapplingPointMod";
@@ -232,7 +264,7 @@ namespace PGM
            
         }
 
-        void StopGrapple()
+        private void StopGrapple()
         {
             lr.SetVertexCount(0);
             for(int i = 0; i < grapplePoint.transform.childCount; i++)
@@ -245,7 +277,7 @@ namespace PGM
 
         private Vector3 currentGrapplePosition;
 
-        void DrawRope()
+        private void DrawRope()
         {
             if (grapplePoint == null) return;
 
