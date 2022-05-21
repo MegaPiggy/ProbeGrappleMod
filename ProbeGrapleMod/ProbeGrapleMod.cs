@@ -11,6 +11,7 @@ using BepInEx;
 
 namespace PGM
 {
+    [BepInDependency("locochoco.plugins.CAMOWA", BepInDependency.DependencyFlags.HardDependency)]
     [BepInPlugin("Locochoco.OWA.ProbeGrapple", "Probe Grapple", "1.1.1")]
     [BepInProcess("OuterWilds_Alpha_1_2.exe")]
     public class ProbeGrapleMod : BaseUnityPlugin
@@ -55,17 +56,20 @@ namespace PGM
 
         public static void GetFiles()
         {
-            if (hookMesh == null)
+            if (Application.loadedLevel == 1)
             {
-                hookMesh = FileImporter.ImportOBJMesh(Path.Combine(DllExecutablePath, "grapleHookModel.obj"));
-            }
-            if (throwClip == null)
-            {
-                try
+                if (hookMesh == null)
                 {
-                    throwClip = FileImporter.ImportWAVAudio(Path.Combine(DllExecutablePath, "Fuoooo.wav"));
+                    hookMesh = FileImporter.ImportOBJMesh(Path.Combine(DllExecutablePath, "grapleHookModel.obj"));
                 }
-                catch { Debug.Log("Erro ao ler o audio"); }
+                if (throwClip == null)
+                {
+                    try
+                    {
+                        throwClip = FileImporter.ImportWAVAudio(Path.Combine(DllExecutablePath, "Fuoooo.wav"));
+                    }
+                    catch { Debug.Log("Erro ao ler o audio"); }
+                }
             }
         }
 
@@ -73,94 +77,107 @@ namespace PGM
         {
             Debug.Log("ProbeGrapleMod was started");
             Debug.Log($"The mod script has been placed in the '{this.gameObject.name}'");
-            GetFiles();
+            SceneLoading.OnSceneLoad += SceneLoading_OnSceneLoad;
         }
 
-        private void Start()
+        private void SceneLoading_OnSceneLoad(int sceneId)
         {
-            modCamera = gameObject.FindWithRequiredTag("MainCamera").camera.transform;
-            player = gameObject.FindWithRequiredTag("Player").transform;
-            ship = gameObject.FindWithRequiredTag("Ship").transform;
-            
-            try
+            if (sceneId == 1)
             {
-                wavPlayer = gameObject.FindWithRequiredTag("Player").GetComponent<AudioSource>();
+                GetFiles();
+                Initialize();
             }
-            catch(Exception e)
+        }
+
+        private void Initialize()
+        {
+            if (Application.loadedLevel == 1)
             {
-                Debug.Log($"Error getting AudioSource from player: {e}");
+                modCamera = gameObject.FindWithRequiredTag("MainCamera").camera.transform;
+                player = gameObject.FindWithRequiredTag("Player").transform;
+                ship = gameObject.FindWithRequiredTag("Ship").transform;
+
+                try
+                {
+                    wavPlayer = gameObject.FindWithRequiredTag("Player").GetComponent<AudioSource>();
+                }
+                catch (Exception e)
+                {
+                    Debug.Log($"Error getting AudioSource from player: {e}");
+                }
+                if (wavPlayer == null)
+                {
+                    wavPlayer = gameObject.FindWithRequiredTag("Player").AddComponent<AudioSource>();
+                }
+                Debug.Log($"The wav player {(wavPlayer != null ? "exists" : "does not exist")}");
+
+
+                IsGrappling = false;
+
+                lr = player.gameObject.AddComponent<LineRenderer>();
+
+                lineThicness = 0.08f;
+                lr.SetWidth(lineThicness, lineThicness);
+
+                lr.material = new Material(Shader.Find("Diffuse"));
+
+                lineColor = new Color(1f, 1f, 0.36f, 1f);
+                lr.material.color = lineColor;
+                lr.SetVertexCount(0);
+
+
+                aparenciaDoTexto = new GUIStyle
+                {
+                    fontSize = 72
+                };
+
+                aparenciaDoTexto.normal.textColor = Color.gray;
             }
-            if(wavPlayer == null)
-            {
-                wavPlayer = gameObject.FindWithRequiredTag("Player").AddComponent<AudioSource>();
-            }
-            Debug.Log($"The wav player {(wavPlayer != null ? "exists" : "does not exist")}");
-
-
-            IsGrappling = false;
-
-            lr = player.gameObject.AddComponent<LineRenderer>();
-
-            lineThicness = 0.08f;
-            lr.SetWidth(lineThicness, lineThicness);
-
-            lr.material = new Material(Shader.Find("Diffuse"));
-
-            lineColor = new Color(1f, 1f, 0.36f, 1f);
-            lr.material.color = lineColor;
-            lr.SetVertexCount(0);
-
-            
-            aparenciaDoTexto = new GUIStyle
-            {
-                fontSize = 72
-            };
-            
-            aparenciaDoTexto.normal.textColor = Color.gray;
-
-            
         }
 
         private bool ropeBroke = false;
         private void FixedUpdate()
         {
-            if (grapplePoint != null)
+            if (Application.loadedLevel == 1)
             {
-
-                float playerDistance = (player.position - grapplePoint.transform.position).magnitude;
-
-                if(playerDistance >= grapleRadius + 25f)
+                if (grapplePoint != null)
                 {
-                    Debug.Log("the rope broke");
-                    StopGrapple();
-                    lr.SetWidth(lineThicness, lineThicness);
-                    ropeBroke = true;
-                }
 
-                if (grapleRadius <= playerDistance && !ropeBroke)
-                {
-                    //Física
+                    float playerDistance = (player.position - grapplePoint.transform.position).magnitude;
 
-                    Vector3 direcao = grapplePoint.transform.position - player.position;
+                    if (playerDistance >= grapleRadius + 25f)
+                    {
+                        Debug.Log("the rope broke");
+                        StopGrapple();
+                        lr.SetWidth(lineThicness, lineThicness);
+                        ropeBroke = true;
+                    }
 
-                    Vector3 forcaElastica = (playerDistance - grapleRadius) * elasticConstant * direcao.normalized * 0.80f;//o 80% é energia perdida em calor etc...
+                    if (grapleRadius <= playerDistance && !ropeBroke)
+                    {
+                        //Física
 
-                    Vector3 forcaDeFriccao = (grapplePoint.rigidbody.velocity - player.gameObject.rigidbody.velocity) * frictionConstant;
-                    
-                    if(IsGrappling)
-                        player.gameObject.GetAttachedOWRigidbody().AddForce(forcaElastica + forcaDeFriccao); //Alguem me ajuda plssss
+                        Vector3 direcao = grapplePoint.transform.position - player.position;
 
+                        Vector3 forcaElastica = (playerDistance - grapleRadius) * elasticConstant * direcao.normalized * 0.80f;//o 80% é energia perdida em calor etc...
+
+                        Vector3 forcaDeFriccao = (grapplePoint.rigidbody.velocity - player.gameObject.rigidbody.velocity) * frictionConstant;
+
+                        if (IsGrappling)
+                            player.gameObject.GetAttachedOWRigidbody().AddForce(forcaElastica + forcaDeFriccao); //Alguem me ajuda plssss
+
+                        else
+                            grapplePoint.gameObject.GetAttachedOWRigidbody().AddForce(-(forcaElastica + forcaDeFriccao / 3));
+
+                        //Visual
+                        lr.SetWidth(lineThicness * grapleRadius / playerDistance, lineThicness * grapleRadius / playerDistance);
+
+                        lr.material.color = lineColor - new Color(0f, 1 - playerDistance / grapleRadius, 0f);
+                    }
                     else
-                        grapplePoint.gameObject.GetAttachedOWRigidbody().AddForce( -(forcaElastica + forcaDeFriccao/3)  );
+                        lr.SetWidth(lineThicness, lineThicness);
 
-                    //Visual
-                    lr.SetWidth(lineThicness * grapleRadius / playerDistance, lineThicness * grapleRadius / playerDistance);
-
-                    lr.material.color = lineColor - new Color(0f, 1 - playerDistance / grapleRadius, 0f);
                 }
-                else
-                    lr.SetWidth(lineThicness, lineThicness);
-                
             }
         }
 
@@ -171,47 +188,51 @@ namespace PGM
 
         private void Update()
         {
-            if (Input.GetKeyDown(KeyCode.G))
+            if (Application.loadedLevel == 1)
             {
-                if (grapplePoint != null)
+                if (Input.GetKeyDown(KeyCode.G))
                 {
-                    StopGrapple();
+                    if (grapplePoint != null)
+                    {
+                        StopGrapple();
 
-                    lr.SetWidth(lineThicness, lineThicness);
+                        lr.SetWidth(lineThicness, lineThicness);
 
+                    }
+                    else if(grapplePoint == null)
+                    {
+                        ropeBroke = false;
+                        StartGrapple(player, grapleRadius);
+                    }
                 }
-                else if(grapplePoint == null)
-                {
-                    ropeBroke = false;
-                    StartGrapple(player, grapleRadius);
-                }
-            }
             
 
-            tempoPassado += Time.deltaTime;
+                tempoPassado += Time.deltaTime;
 
-            if (tempoPassado >= tempoParaAlterar)
-            {
-                if (Input.GetKey(KeyCode.T) && grapleRadius < 100f)
+                if (tempoPassado >= tempoParaAlterar)
                 {
-                    grapleRadius += 0.25f;
-                    tempoPassado = 0f;
-                    tempoDesdeOUltimoTexto = 0f;
-                    showGUI = true;
-                }
-                else if (Input.GetKey(KeyCode.Y) && grapleRadius >= 0.75f)
-                {
-                    grapleRadius -= 0.25f;
-                    tempoPassado = 0f;
-                    tempoDesdeOUltimoTexto = 0f;
-                    showGUI = true;
+                    if (Input.GetKey(KeyCode.T) && grapleRadius < 100f)
+                    {
+                        grapleRadius += 0.25f;
+                        tempoPassado = 0f;
+                        tempoDesdeOUltimoTexto = 0f;
+                        showGUI = true;
+                    }
+                    else if (Input.GetKey(KeyCode.Y) && grapleRadius >= 0.75f)
+                    {
+                        grapleRadius -= 0.25f;
+                        tempoPassado = 0f;
+                        tempoDesdeOUltimoTexto = 0f;
+                        showGUI = true;
+                    }
                 }
             }
         }
 
         private void LateUpdate()
         {
-            DrawRope();
+            if (Application.loadedLevel == 1)
+                DrawRope();
         }
 
         private float tempoDesdeOUltimoTexto = 0f;
@@ -219,12 +240,15 @@ namespace PGM
         private bool showGUI = false;
         private void OnGUI()
         {
-            if (tempoDesdeOUltimoTexto <= tempoDoTexto && showGUI)
-                GUI.Box(new Rect(559f, 519f, 680f, 93f), $"{grapleRadius} m", aparenciaDoTexto);
-            else
-                showGUI = false;
+            if (Application.loadedLevel == 1)
+            {
+                if (tempoDesdeOUltimoTexto <= tempoDoTexto && showGUI)
+                    GUI.Box(new Rect(559f, 519f, 680f, 93f), $"{grapleRadius} m", aparenciaDoTexto);
+                else
+                    showGUI = false;
 
-            tempoDesdeOUltimoTexto += Time.deltaTime;
+                tempoDesdeOUltimoTexto += Time.deltaTime;
+            }
         }
 
 
